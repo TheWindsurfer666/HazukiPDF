@@ -39,6 +39,18 @@ public sealed class PdfCompressionOptions
     /// </summary>
     public bool OptimizeJpegs { get; set; } = true;
 
+    /// <summary>
+    /// Losslessly re-encode black-and-white (1-bit) images, such as scanned pages, with JBIG2 when that is smaller
+    /// (requires PDF 1.4 readers). The pixels stay identical.
+    /// </summary>
+    public bool UseJbig2 { get; set; } = true;
+
+    /// <summary>
+    /// Remove unused glyphs from embedded TrueType fonts that address glyphs directly. Some programs, such as
+    /// Microsoft Print to PDF, embed whole fonts of several hundred kilobytes each.
+    /// </summary>
+    public bool SubsetFonts { get; set; } = true;
+
     /// <summary>Pack small objects into compressed object streams and write a cross-reference stream (requires PDF 1.5 readers).</summary>
     public bool UseObjectStreams { get; set; } = true;
 

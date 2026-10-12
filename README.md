@@ -38,6 +38,8 @@ PdfCompressor.Compress(input, output, PdfCompressionLevel.Lossless);
 |---|---|---|
 | `RecompressStreams` | on | Decodes Flate, LZW, ASCII85, ASCIIHex and RunLength streams and re-encodes them with maximum Deflate. Uncompressed streams get compressed. |
 | `OptimizeJpegs` | on | Re-encodes existing baseline JPEGs with Huffman tables optimized for each image and drops EXIF and other extra segments. The pixels stay identical. |
+| `UseJbig2` | on | Re-encodes black-and-white images, such as scanned pages, with lossless JBIG2 (PDF 1.4). Scans typically shrink by half; the pixels stay identical. |
+| `SubsetFonts` | on | Removes unused glyphs from embedded TrueType fonts that address glyphs directly. Microsoft Print to PDF, for example, embeds whole fonts of several hundred kilobytes. |
 | `UseObjectStreams` | on | Packs small objects into compressed object streams with a cross-reference stream (PDF 1.5). |
 | `RemoveUnusedObjects` | on | Drops objects nothing refers to, such as leftovers from incremental edits. |
 | `DeduplicateObjects` | on | Merges identical objects, such as a font or image embedded on every page. |
