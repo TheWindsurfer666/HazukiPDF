@@ -117,6 +117,15 @@ int pages = HtmlToPdfConverter.Convert(html, output, options);
 - JavaScript is never run, and remote resources are only fetched through your `ResourceResolver`.
 - Widows, orphans and `break-inside: avoid`; a block's top and bottom borders are not repeated where it is split across pages.
 
+## Desktop app
+
+`src/HazukiPdf.WinForms` is a Windows Forms app (Windows only) built on the library.
+
+- **Compress PDF**: add one PDF or many (buttons, or drop files and folders on the list), pick Lossless, Balanced or Maximum, and press Compress. Each file gets a row with its original size, new size and the percentage saved, plus a total for the batch. Results are saved next to the originals with a suffix (`report_compressed.pdf`) or in a folder you choose; originals are never overwritten. Double-click a row to open the result.
+- **HTML to PDF**: paste HTML, open an HTML file, or enter a web address and press Load URL. Press Convert to PDF and choose where to save it. For web pages the app downloads linked style sheets and images with `HttpClient`, since the converter itself never touches the network.
+
+Work runs off the UI thread and can be cancelled. Run it with `dotnet run --project src/HazukiPdf.WinForms`, or download the `HazukiPdf.WinForms` artifact from a CI run (needs the .NET 10 Desktop Runtime). The project sets `EnableWindowsTargeting`, so the whole solution still builds on Linux and macOS; the app's UI-free services (`src/HazukiPdf.WinForms/Services`) are compiled into the test project and tested on every OS.
+
 ## Building
 
 ```

@@ -21,3 +21,12 @@ jobs:
         run: dotnet build --configuration Release
       - name: Test
         run: dotnet test --configuration Release --no-build --verbosity normal
+      - name: Publish desktop app
+        if: runner.os == 'Windows'
+        run: dotnet publish src/HazukiPdf.WinForms --configuration Release --output publish/HazukiPdf.WinForms
+      - name: Upload desktop app
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HazukiPdf.WinForms
+          path: publish/HazukiPdf.WinForms

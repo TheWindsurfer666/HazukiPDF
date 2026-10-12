@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/HazukiPdf.WinForms/HazukiPdf.WinForms.csproj" />
     <Project Path="src/HazukiPdf/HazukiPdf.csproj" />
   </Folder>
   <Folder Name="/tests/">
