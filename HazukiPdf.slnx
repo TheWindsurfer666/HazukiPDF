@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HazukiPdf/HazukiPdf.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HazukiPdf.Tests/HazukiPdf.Tests.csproj" />
+  </Folder>
+</Solution>
