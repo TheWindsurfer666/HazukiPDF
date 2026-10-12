@@ -18,6 +18,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The desktop app targets Windows, but its UI-free services are plain .NET, so they are compiled in here and tested on every OS. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\HazukiPdf.WinForms\Services\*.cs" Link="App\Services\%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\HazukiPdf\HazukiPdf.csproj" />
   </ItemGroup>
