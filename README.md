@@ -1,6 +1,6 @@
 # HazukiPDF
 
-A .NET 10 class library that makes PDF files smaller. It has no dependencies beyond the .NET base class library: the PDF parser, writer, stream filters and JPEG codec are all part of the library.
+A .NET 10 class library that makes PDF files smaller and converts HTML to PDF. It has no dependencies beyond the .NET base class library: the PDF parser, writer, stream filters and JPEG codec are all part of the library.
 
 ## Usage
 
@@ -59,6 +59,63 @@ To protect quality, these images are left alone: image masks and soft masks, col
 - Encrypted PDFs are rejected with `PdfEncryptedException`.
 - The output is never larger than the input: if nothing can be saved, the original bytes are returned and `PdfCompressionResult.OriginalKept` is true. The exception is when a removal option was asked for and removed something.
 - Output is not linearized ("fast web view").
+
+## HTML to PDF
+
+`HtmlToPdfConverter` turns an HTML document with CSS into a PDF. It has its own HTML parser, CSS cascade and layout engine, writes through the library's PDF writer, and sets text in the standard 14 PDF fonts, so nothing needs to be embedded.
+
+```csharp
+using HazukiPdf.Html;
+
+// From a string...
+byte[] pdf = HtmlToPdfConverter.Convert("<h1>Invoice</h1><p>Thank you for your order.</p>");
+
+// ...from a file, with images resolved next to it...
+HtmlToPdfConverter.ConvertFile("report.html", "report.pdf");
+
+// ...or with options.
+var options = new HtmlToPdfOptions
+{
+    PageSize = PageSize.Letter,
+    Landscape = true,
+    Margins = PageMargins.FromMillimeters(20, 15, 20, 15),
+    BaseDirectory = "assets",              // relative <img> paths resolve here, and only here
+    ResourceResolver = src => null,        // return bytes for e.g. https:// images; null falls back
+    UserStyleSheet = "body { font-size: 10pt }",
+    Title = "Report",
+};
+using var output = File.Create("out.pdf");
+int pages = HtmlToPdfConverter.Convert(html, output, options);
+```
+
+### What is supported
+
+| Area | Supported |
+|---|---|
+| HTML | Forgiving parser for real-world markup: implicit end tags, entities, comments, `<style>` blocks, `style` attributes, legacy attributes (`align`, `valign`, `bgcolor`, `width`, `height`, `border`, `cellpadding`, `cellspacing`, `<font>`, `<center>`). |
+| Text | Headings, paragraphs, `b`/`strong`, `i`/`em`, `u`, `s`/`del`, `sub`/`sup`, `small`/`big`, `mark`, `code`/`pre`, `blockquote`, `br`, `hr`, `q`, `dl`. Word wrapping (also after hyphens and inside over-long words), `text-align` including `justify`, `text-indent`, `text-transform`, `letter-spacing`, `word-spacing`, `white-space` (`normal`, `nowrap`, `pre`, `pre-wrap`, `pre-line`). |
+| Fonts | `font-family` maps onto Helvetica (sans-serif, the default), Times (serif) or Courier (monospace), with bold and italic. Text is WinAnsi (Windows-1252) encoded: Western European languages work; other characters become `?`. |
+| Lists | `ul`/`ol`, nesting, `start`, `reversed`, `value`, `list-style-type` (`disc`, `circle`, `square`, `decimal`, `decimal-leading-zero`, `lower`/`upper-alpha`, `lower`/`upper-roman`, `none`). |
+| Tables | Automatic and fixed column widths, `colspan`, `thead` rows repeated on every page, `caption`, `border-collapse`, `border-spacing`, cell `vertical-align`, row and cell backgrounds. Rows are kept on one page when they fit. |
+| Box model | `display` (`block`, `inline`, `list-item`, `table` parts, `none`), `margin` (with collapsing and `auto` centering), `padding`, `border` (`solid`, `dashed`, `dotted`, `double`), `width`, `max-width`, `height`, `min-height`, `background-color`, `color`, `visibility`. A background on `html` or `body` fills the page. |
+| Selectors | Type, class, id, universal, attribute (`[a]`, `=`, `~=`, `\|=`, `^=`, `$=`, `*=`), descendant, `>`, `+`, `~`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()`, `:first-of-type`, `:last-of-type`, `:nth-of-type()`, `:not()`, `:root`, `:empty`, `:link`. Specificity, source order and `!important` are honoured. |
+| Values | Units `px`, `pt`, `pc`, `in`, `cm`, `mm`, `em`, `rem`, `ex`, `ch`, `%`, simple `calc()`. Colors as names, `#rgb`, `#rrggbb`, `rgb()`, `rgba()`, `hsl()`. |
+| Pages | `page-break-before`/`after` and `break-before`/`after`, `@page { size; margin }` (`A3`, `A4`, `A5`, `letter`, `legal`, `landscape`, explicit sizes), `@media print` rules. |
+| Images | PNG (all color types and bit depths, interlaced, transparency as a soft mask) and JPEG (passed through untouched) from `data:` URIs, files under `BaseDirectory`, or a `ResourceResolver`. Missing images show their `alt` text. Images are scaled to fit the page. |
+| Links | `<a href>` to `http`, `https`, `mailto`, `ftp` and `tel` URLs become link annotations; `href="#id"` jumps to the element with that id. |
+| Metadata | Title from `<title>` (or `Title`), `Author`, creation date. |
+
+### What is not supported
+
+- Floats, `position` (absolute, relative, fixed), flexbox and grid. Such elements are laid out in normal flow (`display: flex` and `grid` act as `block`, `inline-block` acts as `inline`).
+- `rowspan` (cells are laid out as if it were 1), `<col>` widths and `table-layout: fixed`.
+- Fonts other than the standard 14 (`@font-face` is ignored), and text outside Windows-1252, such as Cyrillic, Greek, CJK, emoji and right-to-left scripts.
+- `::before`/`::after` and other pseudo-elements, counters, CSS variables, `@import`.
+- Background images, gradients, shadows, rounded corners, opacity, transforms, `overflow` clipping, `box-sizing`, `outline`.
+- Inline `padding`, `border` and `margin` on inline elements (inline backgrounds work), and `vertical-align` other than `sub`, `super` and lengths on inline content.
+- GIF, BMP, WebP and SVG images; `<svg>`, `<canvas>`, form controls, `<iframe>`, video and audio are not drawn.
+- JavaScript is never run, and remote resources are only fetched through your `ResourceResolver`.
+- Widows, orphans and `break-inside: avoid`; a block's top and bottom borders are not repeated where it is split across pages.
 
 ## Building
 
