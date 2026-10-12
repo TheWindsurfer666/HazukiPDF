@@ -38,6 +38,7 @@ public static class PdfCompressor
 
         bool removedData = MetadataCleaner.Run(document, options);
 
+        int jpegs = options.OptimizeJpegs ? JpegOptimizer.Run(document) : 0;
         var imageStats = options.CompressImages ? ImageOptimizer.Run(document, options) : default;
 
         int streams = options.RecompressStreams ? StreamOptimizer.Run(document) : 0;
@@ -55,7 +56,7 @@ public static class PdfCompressor
             OriginalSize = pdf.Length,
             CompressedSize = keepOriginal ? pdf.Length : output.Length,
             OriginalKept = keepOriginal,
-            StreamsRecompressed = keepOriginal ? 0 : streams,
+            StreamsRecompressed = keepOriginal ? 0 : streams + jpegs,
             ImagesRecompressed = keepOriginal ? 0 : imageStats.Recompressed,
             ImagesDownsampled = keepOriginal ? 0 : imageStats.Downsampled,
             DuplicateObjectsRemoved = keepOriginal ? 0 : duplicates,

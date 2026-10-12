@@ -1,5 +1,23 @@
 namespace HazukiPdf.Imaging;
 
+/// <summary>One component of a JPEG as quantized DCT coefficients.</summary>
+/// <param name="Id">Component identifier from the frame header.</param>
+/// <param name="H">Horizontal sampling factor.</param>
+/// <param name="V">Vertical sampling factor.</param>
+/// <param name="Quantization">Quantization table in natural (row-major) order.</param>
+/// <param name="BlocksPerLine">Blocks per row, padded to whole MCUs.</param>
+/// <param name="BlocksPerColumn">Block rows, padded to whole MCUs.</param>
+/// <param name="Coefficients">64 coefficients per block in zig-zag order, blocks in row-major order.</param>
+internal sealed record JpegComponent(int Id, int H, int V, int[] Quantization, int BlocksPerLine, int BlocksPerColumn, short[] Coefficients);
+
+/// <summary>A JPEG image as quantized coefficients, which can be re-encoded without any loss.</summary>
+/// <param name="Width">Image width in pixels.</param>
+/// <param name="Height">Image height in pixels.</param>
+/// <param name="Components">The color components, in frame order.</param>
+/// <param name="AdobeSegment">The original APP14 "Adobe" marker segment, which tells readers how to interpret colors.</param>
+/// <param name="Extended">True when the source used an extended (SOF1) frame.</param>
+internal sealed record JpegCoefficients(int Width, int Height, JpegComponent[] Components, byte[]? AdobeSegment, bool Extended);
+
 /// <summary>Tables and transforms shared by the baseline JPEG encoder and decoder (ITU-T T.81).</summary>
 internal static class JpegCommon
 {

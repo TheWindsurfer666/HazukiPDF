@@ -71,6 +71,36 @@ public class JpegTests
     }
 
     [Fact]
+    public void LosslessRewrite_KeepsPixelsAndShrinksLibjpegOutput()
+    {
+        var original = Convert.FromBase64String(RestartJpeg);
+        var rewritten = JpegEncoder.Write(JpegDecoder.DecodeCoefficients(original));
+
+        Assert.True(rewritten.Length < original.Length, $"{rewritten.Length} bytes is not smaller than {original.Length}");
+        Assert.Equal(JpegDecoder.Decode(original).Pixels, JpegDecoder.Decode(rewritten).Pixels);
+    }
+
+    [Theory]
+    [InlineData(1, 75)]
+    [InlineData(3, 60)]
+    [InlineData(3, 95)]
+    public void LosslessRewrite_RoundTripsOwnOutput(int components, int quality)
+    {
+        var pixels = TestPdf.PhotoPixels(53, 41, components);
+        var jpeg = JpegEncoder.Encode(pixels, 53, 41, components, quality);
+        var rewritten = JpegEncoder.Write(JpegDecoder.DecodeCoefficients(jpeg));
+
+        Assert.Equal(JpegDecoder.Decode(jpeg).Pixels, JpegDecoder.Decode(rewritten).Pixels);
+        Assert.True(rewritten.Length <= jpeg.Length);
+    }
+
+    [Fact]
+    public void LosslessRewrite_RejectsProgressiveJpegs()
+    {
+        Assert.ThrowsAny<Exception>(() => JpegDecoder.DecodeCoefficients(Convert.FromBase64String(ProgressiveJpeg)));
+    }
+
+    [Fact]
     public void Resampler_AveragesAreas()
     {
         byte[] pixels = { 0, 100, 200, 100, 0, 100, 200, 100 }; // 4x2 gray

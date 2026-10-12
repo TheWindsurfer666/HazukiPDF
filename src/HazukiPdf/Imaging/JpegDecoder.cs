@@ -25,8 +25,22 @@ internal sealed class JpegDecoder
     private int _restartInterval;
     private int _adobeTransform = -1;
     private bool _frameSeen;
+    private bool _coefficientMode;
+    private byte[]? _adobeSegment;
+    private bool _extended;
 
     private JpegDecoder(byte[] data) => _data = data;
+
+    /// <summary>
+    /// Reads the quantized DCT coefficients without decoding pixels, so the image can be re-encoded losslessly
+    /// (for example with optimized Huffman tables). Also accepts four-component (CMYK) images.
+    /// </summary>
+    public static JpegCoefficients DecodeCoefficients(byte[] data)
+    {
+        var decoder = new JpegDecoder(data) { _coefficientMode = true };
+        decoder.Parse();
+        return decoder.BuildCoefficients();
+    }
 
     /// <param name="data">The JPEG file.</param>
     /// <param name="colorTransform">The PDF /ColorTransform value, if given; it overrides the file's own marker.</param>
@@ -45,6 +59,7 @@ internal sealed class JpegDecoder
         public byte[] Plane = Array.Empty<byte>();
         public int PlaneWidth;
         public int DcPrediction;
+        public short[] Coefficients = Array.Empty<short>();
     }
 
     private sealed class HuffmanTable
@@ -88,6 +103,12 @@ internal sealed class JpegDecoder
     }
 
     private RasterImage Run(int? colorTransform)
+    {
+        Parse();
+        return BuildImage(colorTransform);
+    }
+
+    private void Parse()
     {
         int pos = 0;
         if (_data.Length < 4 || _data[0] != 0xFF || _data[1] != 0xD8)
@@ -140,6 +161,7 @@ internal sealed class JpegDecoder
                     break;
                 case 0xC0:
                 case 0xC1:
+                    _extended = marker == 0xC1;
                     ReadFrame(segment);
                     break;
                 case 0xC2 or 0xC3 or 0xC5 or 0xC6 or 0xC7 or 0xC9 or 0xCA or 0xCB or 0xCD or 0xCE or 0xCF:
@@ -152,6 +174,7 @@ internal sealed class JpegDecoder
                         _data[segment + 3] == 'b' && _data[segment + 4] == 'e')
                     {
                         _adobeTransform = _data[segment + 11];
+                        _adobeSegment = _data.AsSpan(pos - 2, length + 2).ToArray();
                     }
 
                     break;
@@ -167,8 +190,6 @@ internal sealed class JpegDecoder
         {
             throw new InvalidDataException("The JPEG has no frame.");
         }
-
-        return BuildImage(colorTransform);
     }
 
     private void ReadQuantization(int pos, int end)
@@ -233,7 +254,7 @@ internal sealed class JpegDecoder
             throw new NotSupportedException("Unsupported JPEG dimensions.");
         }
 
-        if (count is not (1 or 3))
+        if (count is not (1 or 3) && !(_coefficientMode && count == 4))
         {
             throw new NotSupportedException("Only grayscale and three-component JPEGs are supported.");
         }
@@ -261,7 +282,14 @@ internal sealed class JpegDecoder
             c.BlocksPerLine = _mcusX * c.H;
             c.BlocksPerColumn = _mcusY * c.V;
             c.PlaneWidth = c.BlocksPerLine * 8;
-            c.Plane = new byte[c.PlaneWidth * c.BlocksPerColumn * 8];
+            if (_coefficientMode)
+            {
+                c.Coefficients = new short[c.BlocksPerLine * c.BlocksPerColumn * 64];
+            }
+            else
+            {
+                c.Plane = new byte[c.PlaneWidth * c.BlocksPerColumn * 8];
+            }
         }
 
         _frameSeen = true;
@@ -305,7 +333,7 @@ internal sealed class JpegDecoder
             {
                 HandleRestart(reader, n, scanComponents);
                 DecodeBlock(reader, c, block);
-                StoreBlock(c, n % blocksX, n / blocksX, block);
+                Store(c, n % blocksX, n / blocksX, block);
             }
         }
         else
@@ -323,7 +351,7 @@ internal sealed class JpegDecoder
                         for (int h = 0; h < c.H; h++)
                         {
                             DecodeBlock(reader, c, block);
-                            StoreBlock(c, (mx * c.H) + h, (my * c.V) + v, block);
+                            Store(c, (mx * c.H) + h, (my * c.V) + v, block);
                         }
                     }
                 }
@@ -410,6 +438,41 @@ internal sealed class JpegDecoder
     }
 
     private static int Extend(int value, int bits) => value < 1 << (bits - 1) ? value - (1 << bits) + 1 : value;
+
+    private void Store(Component c, int blockX, int blockY, Span<int> block)
+    {
+        if (!_coefficientMode)
+        {
+            StoreBlock(c, blockX, blockY, block);
+            return;
+        }
+
+        if (blockX >= c.BlocksPerLine || blockY >= c.BlocksPerColumn)
+        {
+            return;
+        }
+
+        var q = _quantization[c.QuantizationId]!;
+        int offset = ((blockY * c.BlocksPerLine) + blockX) * 64;
+        for (int i = 0; i < 64; i++)
+        {
+            int natural = JpegCommon.ZigZag[i];
+            c.Coefficients[offset + i] = (short)(q[natural] == 0 ? 0 : block[natural] / q[natural]);
+        }
+    }
+
+    private JpegCoefficients BuildCoefficients()
+    {
+        var components = _components.Select(c => new JpegComponent(
+            c.Id,
+            c.H,
+            c.V,
+            _quantization[c.QuantizationId] ?? throw new InvalidDataException("Missing quantization table."),
+            c.BlocksPerLine,
+            c.BlocksPerColumn,
+            c.Coefficients)).ToArray();
+        return new JpegCoefficients(_width, _height, components, _adobeSegment, _extended);
+    }
 
     private static void StoreBlock(Component c, int blockX, int blockY, Span<int> coefficients)
     {

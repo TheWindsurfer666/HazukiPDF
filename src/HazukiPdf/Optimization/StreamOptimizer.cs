@@ -47,7 +47,19 @@ internal static class StreamOptimizer
 
         if (filters.Count > 0 && prefix == 0)
         {
-            return false;
+            // Already-compressed data (JPEG, fax, JBIG2) that this library does not re-encode here: a Flate layer
+            // on top still helps when the data has long repeats, such as JPEGs of flat artwork.
+            var wrapped = StreamFilters.Deflate(stream.Data);
+            if (wrapped.Length >= stream.Data.Length * 0.97)
+            {
+                return false;
+            }
+
+            stream.Data = wrapped;
+            var withFlate = new List<FilterSpec> { new("FlateDecode", null) };
+            withFlate.AddRange(filters);
+            SetFilters(stream, withFlate);
+            return true;
         }
 
         byte[] decoded = stream.Data;
