@@ -16,12 +16,21 @@ public class PdfFormatException : Exception
     }
 }
 
-/// <summary>Thrown when the input PDF is encrypted; encrypted files are not supported.</summary>
+/// <summary>
+/// Thrown when an encrypted PDF cannot be opened: it needs a password that was not given
+/// (see <see cref="PdfCompressionOptions.Password"/>), or it uses an unsupported security handler.
+/// </summary>
 public sealed class PdfEncryptedException : PdfFormatException
 {
     /// <summary>Creates the exception.</summary>
     public PdfEncryptedException()
-        : base("The PDF is encrypted. Encrypted files are not supported.")
+        : base("The PDF is encrypted and needs a password to open.")
+    {
+    }
+
+    /// <summary>Creates the exception with a message.</summary>
+    public PdfEncryptedException(string message)
+        : base(message)
     {
     }
 }

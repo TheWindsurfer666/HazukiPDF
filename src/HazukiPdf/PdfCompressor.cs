@@ -33,7 +33,7 @@ public static class PdfCompressor
         ArgumentNullException.ThrowIfNull(pdf);
         options ??= new PdfCompressionOptions();
 
-        var document = PdfReader.Read(pdf);
+        var document = PdfReader.Read(pdf, options.Password);
         int loaded = document.Objects.Count;
 
         bool removedData = MetadataCleaner.Run(document, options);

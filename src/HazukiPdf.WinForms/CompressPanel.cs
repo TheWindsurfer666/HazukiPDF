@@ -178,10 +178,12 @@ internal sealed class CompressPanel : UserControl
         foreach (var path in paths)
         {
             IEnumerable<string> files;
+            int skipped = 0;
             try
             {
+                // Leave out earlier results (the output folder and *_compressed files) when adding a folder.
                 files = Directory.Exists(path)
-                    ? Directory.EnumerateFiles(path, "*.pdf", SearchOption.AllDirectories).ToList()
+                    ? PdfFolderScanner.Find(path, _outputFolder.Text.Trim(), _suffix.Text, out skipped)
                     : File.Exists(path) && path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? [path] : [];
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -200,7 +202,11 @@ internal sealed class CompressPanel : UserControl
                 }
             }
             if (Directory.Exists(path))
+            {
                 _log.Info($"Added {added} PDF{(added == 1 ? "" : "s")} from {path}");
+                if (skipped > 0)
+                    _log.Info($"Skipped {skipped} earlier result{(skipped == 1 ? "" : "s")} (files in the output folder or ending in {(_suffix.Text.Trim().Length > 0 ? _suffix.Text.Trim() : OutputPathPlanner.DefaultSuffix)})");
+            }
             else if (added == 1)
                 _log.Info("Added to the list", path);
             else if (!path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
