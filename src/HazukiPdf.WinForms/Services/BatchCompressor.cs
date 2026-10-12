@@ -116,9 +116,9 @@ public static class BatchCompressor
             var result = PdfCompressor.CompressFile(inputPath, outputPath, options);
             return new FileCompressionResult(inputPath, outputPath, result.OriginalSize, result.CompressedSize, result.OriginalKept, null);
         }
-        catch (PdfEncryptedException)
+        catch (PdfEncryptedException e)
         {
-            return Failed("The file is encrypted.");
+            return Failed(e.Message);
         }
         catch (PdfFormatException e)
         {

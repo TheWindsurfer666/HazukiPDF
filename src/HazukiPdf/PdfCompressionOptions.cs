@@ -34,6 +34,11 @@ public sealed class PdfCompressionOptions
     /// <summary>Decode Flate, LZW, ASCII85, ASCIIHex and RunLength streams and re-encode them with maximum Deflate; compress uncompressed streams.</summary>
     public bool RecompressStreams { get; set; } = true;
 
+    /// <summary>
+    /// Losslessly re-encode JPEG images with Huffman tables optimized for each image (the pixels stay identical).
+    /// </summary>
+    public bool OptimizeJpegs { get; set; } = true;
+
     /// <summary>Pack small objects into compressed object streams and write a cross-reference stream (requires PDF 1.5 readers).</summary>
     public bool UseObjectStreams { get; set; } = true;
 
@@ -78,6 +83,13 @@ public sealed class PdfCompressionOptions
             ? value
             : throw new ArgumentOutOfRangeException(nameof(value), "The maximum image DPI must be at least 10.");
     }
+
+    /// <summary>
+    /// Password for encrypted files (user or owner password). When null, files that open without a password
+    /// (most "protected" files only restrict printing or editing) are still read. Encrypted input is written
+    /// out unencrypted.
+    /// </summary>
+    public string? Password { get; set; }
 
     /// <summary>Returns a new options instance for a preset.</summary>
     public static PdfCompressionOptions FromLevel(PdfCompressionLevel level)

@@ -37,6 +37,7 @@ PdfCompressor.Compress(input, output, PdfCompressionLevel.Lossless);
 | Option | Default (`new PdfCompressionOptions()`) | |
 |---|---|---|
 | `RecompressStreams` | on | Decodes Flate, LZW, ASCII85, ASCIIHex and RunLength streams and re-encodes them with maximum Deflate. Uncompressed streams get compressed. |
+| `OptimizeJpegs` | on | Re-encodes existing baseline JPEGs with Huffman tables optimized for each image and drops EXIF and other extra segments. The pixels stay identical. |
 | `UseObjectStreams` | on | Packs small objects into compressed object streams with a cross-reference stream (PDF 1.5). |
 | `RemoveUnusedObjects` | on | Drops objects nothing refers to, such as leftovers from incremental edits. |
 | `DeduplicateObjects` | on | Merges identical objects, such as a font or image embedded on every page. |
@@ -47,6 +48,7 @@ PdfCompressor.Compress(input, output, PdfCompressionLevel.Lossless);
 | `RemoveDocumentInfo` | off | Removes title, author, producer and so on. |
 | `RemoveThumbnails` | off | Removes embedded page thumbnails. |
 | `RemovePrivateApplicationData` | off | Removes `/PieceInfo` data stored by editors such as Illustrator. |
+| `Password` | null | User or owner password for encrypted files. Files that only restrict printing or editing open without one. |
 
 ## How images are handled
 
@@ -56,7 +58,7 @@ To protect quality, these images are left alone: image masks and soft masks, col
 
 ## Limitations
 
-- Encrypted PDFs are rejected with `PdfEncryptedException`.
+- Encrypted PDFs (RC4, AES-128 and AES-256 standard security) are decrypted and written out unencrypted. A file that needs a password you did not give is rejected with `PdfEncryptedException`.
 - The output is never larger than the input: if nothing can be saved, the original bytes are returned and `PdfCompressionResult.OriginalKept` is true. The exception is when a removal option was asked for and removed something.
 - Output is not linearized ("fast web view").
 

@@ -1,6 +1,7 @@
 using System.Text;
 using HazukiPdf.Filters;
 using HazukiPdf.Objects;
+using HazukiPdf.Security;
 
 namespace HazukiPdf.Parsing;
 
@@ -19,6 +20,8 @@ internal sealed class PdfReader
     private readonly Dictionary<int, Dictionary<int, PdfObject>> _objectStreams = new();
     private Dictionary<int, int>? _scannedOffsets;
     private PdfDictionary _trailer = new();
+    private StandardSecurityHandler? _security;
+    private int _encryptNumber = -1;
 
     private PdfReader(byte[] data)
     {
@@ -28,17 +31,19 @@ internal sealed class PdfReader
 
     private readonly record struct XrefEntry(bool Compressed, long Offset, int StreamNumber, int Index);
 
-    public static PdfDocument Read(byte[] data)
+    /// <param name="data">The PDF file.</param>
+    /// <param name="password">Password for encrypted files; null tries the empty user password.</param>
+    public static PdfDocument Read(byte[] data, string? password = null)
     {
         if (IndexOf(data, "%PDF-"u8, 0, Math.Min(data.Length, 1024)) < 0)
         {
             throw new PdfFormatException("The input is not a PDF file (no %PDF- header found).");
         }
 
-        return new PdfReader(data).Load();
+        return new PdfReader(data).Load(password);
     }
 
-    private PdfDocument Load()
+    private PdfDocument Load(string? password)
     {
         bool xrefOk;
         try
@@ -55,9 +60,9 @@ internal sealed class PdfReader
             Reconstruct();
         }
 
-        if (_trailer.Get("Encrypt") != null)
+        if (_trailer.Get("Encrypt") is { } encryptEntry)
         {
-            throw new PdfEncryptedException();
+            SetUpDecryption(encryptEntry, password);
         }
 
         var objects = new Dictionary<int, PdfObject>();
@@ -100,6 +105,38 @@ internal sealed class PdfReader
         }
 
         return new PdfDocument(objects, trailer, ReadVersion());
+    }
+
+    private void SetUpDecryption(PdfObject encryptEntry, string? password)
+    {
+        if (encryptEntry is PdfReference encryptRef)
+        {
+            _encryptNumber = encryptRef.ObjectNumber;
+            encryptEntry = GetObject(encryptRef.ObjectNumber)!;
+        }
+
+        if (encryptEntry is not PdfDictionary encrypt)
+        {
+            throw new PdfEncryptedException("The encryption dictionary is missing or damaged.");
+        }
+
+        var ids = _trailer.Get("ID") as PdfArray;
+        var firstId = ids != null && ids.Count > 0 && (ids[0] is PdfReference r ? GetObject(r.ObjectNumber) : ids[0]) is PdfString id
+            ? id.Value
+            : Array.Empty<byte>();
+        try
+        {
+            _security = StandardSecurityHandler.Create(encrypt, firstId, password);
+        }
+        catch (PdfEncryptedException) when (!string.IsNullOrEmpty(password))
+        {
+            // The given password may not be needed at all.
+            _security = StandardSecurityHandler.Create(encrypt, firstId, null);
+        }
+
+        // Objects read so far (while finding the trailer) are still encrypted.
+        _cache.Clear();
+        _objectStreams.Clear();
     }
 
     private string ReadVersion()
@@ -574,15 +611,29 @@ internal sealed class PdfReader
             return null;
         }
 
-        return ParseIndirectObject(new PdfLexer(_data, (int)position.Value), out _);
+        var obj = ParseIndirectObject(new PdfLexer(_data, (int)position.Value), out _, out int generation);
+        if (_security != null && obj != null && number != _encryptNumber)
+        {
+            if (obj is PdfStream stream)
+            {
+                stream.Data = _security.DecryptStream(stream, number, generation);
+            }
+
+            obj = _security.DecryptStrings(obj, number, generation);
+        }
+
+        return obj;
     }
 
-    private PdfObject? ParseIndirectObject(PdfLexer lexer, out int number)
+    private PdfObject? ParseIndirectObject(PdfLexer lexer, out int number) => ParseIndirectObject(lexer, out number, out _);
+
+    private PdfObject? ParseIndirectObject(PdfLexer lexer, out int number, out int generation)
     {
         var num = lexer.Next();
-        lexer.Next(); // generation
+        var gen = lexer.Next();
         lexer.Next(); // obj
         number = num.Type == TokenType.Integer ? (int)num.IntegerValue : 0;
+        generation = gen.Type == TokenType.Integer ? (int)Math.Clamp(gen.IntegerValue, 0, 65535) : 0;
         var obj = lexer.ReadObject();
         if (obj is not PdfDictionary dict)
         {
