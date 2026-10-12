@@ -62,6 +62,7 @@ public static class BatchCompressor
     /// <param name="options">Compression settings, shared by every file.</param>
     /// <param name="planner">Chooses each output path.</param>
     /// <param name="progress">Receives each result as soon as its file is done.</param>
+    /// <param name="started">Receives each input path when work on that file begins.</param>
     /// <param name="maxParallelism">How many files to work on at once. Defaults to half the processors, at most 4.</param>
     /// <param name="cancellationToken">Stops starting new files; files already being compressed finish.</param>
     /// <returns>One result per input, in input order. Files skipped by cancellation are left out.</returns>
@@ -70,6 +71,7 @@ public static class BatchCompressor
         PdfCompressionOptions options,
         OutputPathPlanner planner,
         IProgress<FileCompressionResult>? progress = null,
+        IProgress<string>? started = null,
         int? maxParallelism = null,
         CancellationToken cancellationToken = default)
     {
@@ -89,6 +91,7 @@ public static class BatchCompressor
                 new ParallelOptions { MaxDegreeOfParallelism = parallelism, CancellationToken = cancellationToken },
                 (i, _) =>
                 {
+                    started?.Report(files[i]);
                     var result = CompressOne(files[i], outputs[i], options);
                     results[i] = result;
                     progress?.Report(result);

@@ -25,12 +25,20 @@ internal sealed class CompressPanel : UserControl
     private readonly Button _compress;
     private readonly Button _cancel;
     private readonly Button[] _listButtons;
+    private readonly Button _openOutput;
     private readonly ProgressBar _progress;
+    private readonly Label _progressText;
     private readonly Label _summary;
+    private readonly LogView _log;
+    private readonly AppSettings _settings;
     private CancellationTokenSource? _cts;
+    private int _done;
 
-    public CompressPanel()
+    public CompressPanel(LogView log, AppSettings settings)
     {
+        _log = log;
+        _settings = settings;
+
         // Toolbar
         var addFiles = MakeButton("Add files…", (_, _) => AddFilesFromDialog());
         var addFolder = MakeButton("Add folder…", (_, _) => AddFolderFromDialog());
@@ -91,21 +99,28 @@ internal sealed class CompressPanel : UserControl
         _level.SelectedIndexChanged += (_, _) => _levelDescription.Text = Levels[_level.SelectedIndex].Description;
         _levelDescription.Text = Levels[_level.SelectedIndex].Description;
 
-        _nextToOriginal = new RadioButton { Text = "Next to the originals", AutoSize = true, Checked = true };
-        _toFolder = new RadioButton { Text = "In this folder:", AutoSize = true };
-        _outputFolder = new TextBox { Width = 320, Enabled = false };
+        _nextToOriginal = new RadioButton { Text = "Next to the originals", AutoSize = true, Checked = true, Margin = new Padding(3, 6, 3, 3) };
+        _toFolder = new RadioButton { Text = "In this folder:", AutoSize = true, Margin = new Padding(12, 6, 3, 3) };
+        _outputFolder = new TextBox { Width = 340, Enabled = false, PlaceholderText = "Choose a folder…" };
         _browseOutput = MakeButton("Browse…", (_, _) => BrowseOutputFolder());
         _browseOutput.Enabled = false;
+        _openOutput = MakeButton("Open folder", (_, _) => OpenOutputFolder());
         _toFolder.CheckedChanged += (_, _) => _outputFolder.Enabled = _browseOutput.Enabled = _toFolder.Checked;
         _suffix = new TextBox { Text = OutputPathPlanner.DefaultSuffix, Width = 120 };
+
+        // Restore last session's choices.
+        _level.SelectedIndex = Math.Clamp(settings.CompressionLevel, 0, Levels.Length - 1);
+        _outputFolder.Text = settings.CompressOutputFolder ?? "";
+        _toFolder.Checked = settings.UseCompressOutputFolder && _outputFolder.Text.Length > 0;
+        _suffix.Text = settings.Suffix;
 
         var options = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(0, 6, 0, 6) };
         options.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         options.Controls.Add(MakeLabel("Level:"), 0, 0);
         options.Controls.Add(Flow(_level, _levelDescription), 1, 0);
-        options.Controls.Add(MakeLabel("Save:"), 0, 1);
-        options.Controls.Add(Flow(_nextToOriginal, _toFolder, _outputFolder, _browseOutput), 1, 1);
+        options.Controls.Add(MakeLabel("Save results:"), 0, 1);
+        options.Controls.Add(Flow(_nextToOriginal, _toFolder, _outputFolder, _browseOutput, _openOutput), 1, 1);
         options.Controls.Add(MakeLabel("Name suffix:"), 0, 2);
         options.Controls.Add(Flow(_suffix, new Label
         {
@@ -117,20 +132,24 @@ internal sealed class CompressPanel : UserControl
 
         // Bottom bar
         _progress = new ProgressBar { Dock = DockStyle.Fill, Height = 22, Margin = new Padding(3, 8, 3, 3) };
-        _summary = new Label { AutoSize = true, Margin = new Padding(3, 8, 12, 3) };
+        _progressText = new Label { AutoSize = true, Margin = new Padding(6, 8, 6, 3) };
+        _summary = new Label { AutoSize = true, Margin = new Padding(3, 3, 3, 3), Dock = DockStyle.Fill };
         _compress = MakeButton("Compress", async (_, _) => await CompressAsync());
         _compress.Font = new Font(_compress.Font, FontStyle.Bold);
         _cancel = MakeButton("Cancel", (_, _) => Cancel());
         _cancel.Enabled = false;
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4 };
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        // Row 1: progress bar, "3 of 10 files (30 %)", buttons. Row 2: what is happening, or the batch totals.
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, RowCount = 2 };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bottom.Controls.Add(_summary, 0, 0);
-        bottom.Controls.Add(_progress, 1, 0);
+        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bottom.Controls.Add(_progress, 0, 0);
+        bottom.Controls.Add(_progressText, 1, 0);
         bottom.Controls.Add(_compress, 2, 0);
         bottom.Controls.Add(_cancel, 3, 0);
+        bottom.Controls.Add(_summary, 0, 1);
+        bottom.SetColumnSpan(_summary, 4);
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -170,12 +189,22 @@ internal sealed class CompressPanel : UserControl
                 MessageBox.Show(this, $"Could not read {path}:\n{e.Message}", "HazukiPDF", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 continue;
             }
+            int added = 0;
             foreach (var file in files)
             {
                 string full = Path.GetFullPath(file);
                 if (known.Add(full))
+                {
                     _rows.Add(new FileRow(full));
+                    added++;
+                }
             }
+            if (Directory.Exists(path))
+                _log.Info($"Added {added} PDF{(added == 1 ? "" : "s")} from {path}");
+            else if (added == 1)
+                _log.Info("Added to the list", path);
+            else if (!path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                _log.Warning("Skipped: not a PDF file", path);
         }
         UpdateSummary();
     }
@@ -235,27 +264,54 @@ internal sealed class CompressPanel : UserControl
 
         _cts = new CancellationTokenSource();
         SetBusy(true);
+        _done = 0;
         _progress.Maximum = rows.Count;
-        _progress.Value = 0;
+        ShowProgress(rows.Count);
         _summary.Text = $"Compressing {rows.Count} file{(rows.Count == 1 ? "" : "s")}…";
+        SaveSettings();
+        _log.Info($"Started: {rows.Count} file{(rows.Count == 1 ? "" : "s")}, level {Levels[_level.SelectedIndex].Name}, " +
+                  (outputFolder is null ? "saving next to the originals" : $"saving to {outputFolder}"));
 
-        // Progress<T> is created on the UI thread, so its callback runs there.
+        // Progress<T> is created on the UI thread, so its callbacks run there.
+        var reported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool finished = false;
+        var started = new Progress<string>(path =>
+        {
+            if (finished)
+                return;
+            var row = rowByPath[path];
+            if (row.Result is null)
+                row.Status = "Compressing…";
+            _summary.Text = $"Compressing {Path.GetFileName(path)}…";
+        });
         var progress = new Progress<FileCompressionResult>(result =>
         {
+            if (!reported.Add(result.InputPath))
+                return;
             rowByPath[result.InputPath].Result = result;
-            _progress.Value = Math.Min(_progress.Maximum, _progress.Value + 1);
+            LogResult(result);
+            _done++;
+            ShowProgress(rows.Count);
         });
 
         try
         {
-            var results = await BatchCompressor.CompressAsync(rows.Select(r => r.Path).ToList(), options, planner, progress,
+            var results = await BatchCompressor.CompressAsync(rows.Select(r => r.Path).ToList(), options, planner, progress, started,
                 cancellationToken: _cts.Token);
             // Progress callbacks are posted, so some may not have run yet; the returned list is complete.
-            foreach (var result in results)
+            finished = true;
+            foreach (var result in results.Where(r => reported.Add(r.InputPath)))
+            {
                 rowByPath[result.InputPath].Result = result;
+                LogResult(result);
+            }
+            _done = results.Count;
+            ShowProgress(rows.Count);
             foreach (var row in rows.Where(r => r.Result is null))
+            {
                 row.Status = "Cancelled";
-            _progress.Value = results.Count;
+                _log.Warning("Not compressed: cancelled", row.Path);
+            }
             ShowSummary(BatchSummary.From(results), _cts.IsCancellationRequested);
         }
         finally
@@ -278,6 +334,48 @@ internal sealed class CompressPanel : UserControl
         if (cancelled)
             text += ", cancelled";
         _summary.Text = text;
+        if (summary.Failed > 0 || cancelled)
+            _log.Warning("Finished: " + text);
+        else
+            _log.Success("Finished: " + text);
+    }
+
+    private void ShowProgress(int total)
+    {
+        _progress.Value = Math.Min(_done, _progress.Maximum);
+        _progressText.Text = total == 0 ? "" : $"{_done} of {total} files ({_done * 100 / total} %)";
+    }
+
+    private void LogResult(FileCompressionResult result)
+    {
+        if (!result.Succeeded)
+            _log.Error("Failed: " + result.Error, result.InputPath);
+        else if (result.OriginalKept)
+            _log.Info($"Already optimal, copied unchanged ({SizeFormat.Bytes(result.OriginalSize)}) to {result.OutputPath}", result.InputPath);
+        else
+            _log.Success($"{SizeFormat.Bytes(result.OriginalSize)} → {SizeFormat.Bytes(result.CompressedSize)} " +
+                         $"({SizeFormat.Percent(result.PercentSaved)} smaller), saved to {result.OutputPath}", result.InputPath);
+    }
+
+    /// <summary>Copies the current choices into the settings object (the main form writes it to disk).</summary>
+    public void SaveSettings()
+    {
+        _settings.CompressionLevel = _level.SelectedIndex;
+        _settings.UseCompressOutputFolder = _toFolder.Checked;
+        _settings.CompressOutputFolder = _outputFolder.Text.Trim();
+        _settings.Suffix = _suffix.Text;
+    }
+
+    private void OpenOutputFolder()
+    {
+        string? folder = _toFolder.Checked ? _outputFolder.Text.Trim() : null;
+        if (string.IsNullOrEmpty(folder))
+        {
+            // Next to the originals: open the first original's folder.
+            folder = (SelectedRow() ?? _rows.FirstOrDefault())?.Folder;
+        }
+        if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
+            Shell.Open(folder);
     }
 
     private void UpdateSummary()
@@ -290,7 +388,9 @@ internal sealed class CompressPanel : UserControl
             1 => "1 file",
             var n => $"{n} files",
         };
+        _done = 0;
         _progress.Value = 0;
+        _progressText.Text = "";
     }
 
     private void SetBusy(bool busy)

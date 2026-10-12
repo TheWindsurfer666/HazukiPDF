@@ -29,6 +29,9 @@ internal sealed class HtmlPanel : UserControl
     private readonly ProgressBar _progress;
     private readonly Label _status;
     private readonly LinkLabel _openPdf;
+    private readonly TextBox _outputFolder;
+    private readonly LogView _log;
+    private readonly AppSettings _settings;
     private CancellationTokenSource? _cts;
 
     // Where relative image paths in the editor's HTML resolve: a web address or a folder, never both.
@@ -37,8 +40,11 @@ internal sealed class HtmlPanel : UserControl
     private string? _styleSheets;
     private string? _lastPdf;
 
-    public HtmlPanel()
+    public HtmlPanel(LogView log, AppSettings settings)
     {
+        _log = log;
+        _settings = settings;
+
         _url = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "https://example.com", Margin = new Padding(3, 5, 3, 3) };
         _url.KeyDown += async (_, e) =>
         {
@@ -91,10 +97,26 @@ internal sealed class HtmlPanel : UserControl
         _pageSize.SelectedIndex = 0;
         _landscape = new CheckBox { Text = "Landscape", AutoSize = true, Margin = new Padding(12, 6, 3, 3) };
         _margin = new NumericUpDown { Minimum = 0, Maximum = 50, Value = 12.7m, DecimalPlaces = 1, Increment = 1, Width = 70 };
-        var options = CompressPanel.Flow(
-            CompressPanel.MakeLabel("Page size:"), _pageSize, _landscape,
-            CompressPanel.MakeLabel("Margins (mm):"), _margin);
-        options.Padding = new Padding(0, 4, 0, 4);
+        _outputFolder = new TextBox
+        {
+            Width = 340,
+            Text = settings.HtmlOutputFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+        _outputFolder.TextChanged += (_, _) => _settings.HtmlOutputFolder = _outputFolder.Text.Trim();
+        var options = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(0, 4, 0, 4) };
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        options.Controls.Add(CompressPanel.MakeLabel("Page:"), 0, 0);
+        options.Controls.Add(CompressPanel.Flow(_pageSize, _landscape, CompressPanel.MakeLabel("Margins (mm):"), _margin), 1, 0);
+        options.Controls.Add(CompressPanel.MakeLabel("Save PDFs in:"), 0, 1);
+        options.Controls.Add(CompressPanel.Flow(
+            _outputFolder,
+            CompressPanel.MakeButton("Browse…", (_, _) => BrowseOutputFolder()),
+            CompressPanel.MakeButton("Open folder", (_, _) =>
+            {
+                if (Directory.Exists(_outputFolder.Text.Trim()))
+                    Shell.Open(_outputFolder.Text.Trim());
+            })), 1, 1);
 
         _status = new Label { AutoSize = true, Margin = new Padding(3, 8, 6, 3) };
         _openPdf = new LinkLabel { Text = "Open PDF", AutoSize = true, Visible = false, Margin = new Padding(3, 8, 12, 3) };
@@ -149,9 +171,13 @@ internal sealed class HtmlPanel : UserControl
             return;
         }
 
+        _log.Info($"Loading {url}…");
         var page = await RunAsync($"Loading {url}…", token => _loader.LoadAsync(url, token));
         if (page is null)
+        {
+            _log.Error($"Could not load {url}. {_status.Text}");
             return;
+        }
 
         _html.Text = page.Html.ReplaceLineEndings("\r\n");
         _url.Text = url.ToString();
@@ -160,6 +186,8 @@ internal sealed class HtmlPanel : UserControl
         _styleSheets = page.StyleSheets;
         _source.Text = $"Loaded {SizeFormat.Bytes(page.Html.Length)} from {page.BaseUri}. Images are downloaded from there when converting.";
         _status.Text = "Page loaded.";
+        _log.Info($"Loaded {url} ({SizeFormat.Bytes(page.Html.Length)})" +
+                  (page.StyleSheets.Length > 0 ? ", with linked style sheets" : ""));
     }
 
     private void OpenHtmlFile()
@@ -183,6 +211,7 @@ internal sealed class HtmlPanel : UserControl
         _styleSheets = null;
         _url.Text = "";
         _source.Text = $"Opened {dialog.FileName}. Images next to it are included.";
+        _log.Info("Opened HTML file", dialog.FileName);
     }
 
     private void ClearSource()
@@ -226,9 +255,15 @@ internal sealed class HtmlPanel : UserControl
             FileName = SuggestFileName(html),
             OverwritePrompt = true,
         };
+        if (Directory.Exists(_outputFolder.Text.Trim()))
+            dialog.InitialDirectory = _outputFolder.Text.Trim();
         if (dialog.ShowDialog(this) != DialogResult.OK)
             return;
         string target = dialog.FileName;
+        // The folder picked in the dialog becomes the default for next time.
+        _outputFolder.Text = Path.GetDirectoryName(target) ?? _outputFolder.Text;
+        string sourceName = _baseUri?.ToString() ?? "pasted HTML";
+        _log.Info($"Converting {sourceName}…", target);
 
         var pageSize = PageSizes[_pageSize.SelectedIndex].Size;
         bool landscape = _landscape.Checked;
@@ -256,7 +291,14 @@ internal sealed class HtmlPanel : UserControl
         }, token));
 
         if (outcome is not { } done)
+        {
+            if (_status.Text.StartsWith("Cancelled", StringComparison.Ordinal))
+                _log.Warning("Conversion cancelled", target);
+            else
+                _log.Error($"Conversion of {sourceName} failed. {_status.Text}", target);
             return;
+        }
+        _log.Success($"{done.Pages} page{(done.Pages == 1 ? "" : "s")}, {SizeFormat.Bytes(done.Bytes)}, saved to {target}", target);
         _lastPdf = target;
         _openPdf.Visible = true;
         _status.Text = $"Saved {done.Pages} page{(done.Pages == 1 ? "" : "s")}, {SizeFormat.Bytes(done.Bytes)}, to {Path.GetFileName(target)}.";
@@ -282,8 +324,8 @@ internal sealed class HtmlPanel : UserControl
         {
             // Anything else (a network error, an unwritable file, HTML the converter rejects) is shown, not thrown,
             // because an exception escaping an async event handler would close the app.
-            _status.Text = "Failed.";
             string text = e is TaskCanceledException ? "The server took too long to answer." : e.Message;
+            _status.Text = "Failed: " + text;
             MessageBox.Show(this, text, "HazukiPDF", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
@@ -293,6 +335,15 @@ internal sealed class HtmlPanel : UserControl
             SetBusy(false);
         }
         return default;
+    }
+
+    private void BrowseOutputFolder()
+    {
+        using var dialog = new FolderBrowserDialog { Description = "Save converted PDFs in", ShowNewFolderButton = true };
+        if (Directory.Exists(_outputFolder.Text.Trim()))
+            dialog.InitialDirectory = _outputFolder.Text.Trim();
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            _outputFolder.Text = dialog.SelectedPath;
     }
 
     private void SetBusy(bool busy)

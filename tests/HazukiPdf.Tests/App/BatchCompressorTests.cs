@@ -28,16 +28,19 @@ public sealed class BatchCompressorTests : IDisposable
         string second = WriteFile("two.pdf", TestPdf.WithPages(TestPdf.TextPage(80)));
         string[] files = [first, broken, second];
         var reported = new List<FileCompressionResult>();
+        var started = new List<string>();
 
         var results = await BatchCompressor.CompressAsync(
             files,
             PdfCompressionOptions.FromLevel(PdfCompressionLevel.Lossless),
             new OutputPathPlanner(files, null, "_compressed"),
             new SyncProgress<FileCompressionResult>(r => { lock (reported) reported.Add(r); }),
+            new SyncProgress<string>(f => { lock (started) started.Add(f); }),
             maxParallelism: 2);
 
         Assert.Equal(files, results.Select(r => r.InputPath));
         Assert.Equal(3, reported.Count);
+        Assert.Equal(files.Order(), started.Order());
 
         var ok = results[0];
         Assert.True(ok.Succeeded);
