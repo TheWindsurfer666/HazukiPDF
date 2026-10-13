@@ -15,12 +15,44 @@ namespace HazukiPdf.Optimization;
 /// </remarks>
 internal static class FontSubsetter
 {
-    public static int Run(PdfDocument document)
+    /// <summary>Subsets fonts and/or strips their hinting; returns the number of font programs changed.</summary>
+    public static int Run(PdfDocument document, bool subset, bool stripHinting)
+    {
+        var done = new HashSet<PdfStream>(ReferenceEqualityComparer.Instance);
+        if (subset)
+        {
+            SubsetAll(document, stripHinting, done);
+        }
+
+        if (stripHinting)
+        {
+            foreach (var obj in document.Objects.Values)
+            {
+                if (obj is PdfDictionary dict && obj is not PdfStream && dict.GetName("Type") == "FontDescriptor" &&
+                    document.Get(dict, "FontFile2") is PdfStream program && done.Add(program))
+                {
+                    if (ImageUsageScanner.Decode(document, program) is not { } data ||
+                        TrueTypeSubsetter.Subset(data, null, stripHinting: true) is not { } stripped ||
+                        stripped.Length >= data.Length * 0.97)
+                    {
+                        done.Remove(program);
+                        continue;
+                    }
+
+                    Replace(program, stripped);
+                }
+            }
+        }
+
+        return done.Count;
+    }
+
+    private static void SubsetAll(PdfDocument document, bool stripHinting, HashSet<PdfStream> done)
     {
         var usage = FontUsageScanner.Scan(document);
         if (usage == null)
         {
-            return 0;
+            return;
         }
 
         // Group eligible fonts by their font program; a program shared with any other kind of font is left alone.
@@ -80,7 +112,6 @@ internal static class FontSubsetter
             }
         }
 
-        int changed = 0;
         foreach (var (program, fonts) in users)
         {
             // Every font that uses the program must have been seen, or it may be drawn somewhere this scan missed.
@@ -98,16 +129,21 @@ internal static class FontSubsetter
                 }
             }
 
-            if (allSeen && TrySubset(document, program, fonts, glyphs))
+            if (allSeen && TrySubset(document, program, fonts, glyphs, stripHinting))
             {
-                changed++;
+                done.Add(program);
             }
         }
-
-        return changed;
     }
 
-    private static bool TrySubset(PdfDocument document, PdfStream program, List<PdfDictionary> fonts, HashSet<int> glyphs)
+    private static void Replace(PdfStream program, byte[] font)
+    {
+        program.Data = font;
+        StreamOptimizer.SetFilters(program, Array.Empty<Filters.FilterSpec>());
+        program.Set("Length1", new PdfInteger(font.Length));
+    }
+
+    private static bool TrySubset(PdfDocument document, PdfStream program, List<PdfDictionary> fonts, HashSet<int> glyphs, bool stripHinting)
     {
         var data = ImageUsageScanner.Decode(document, program);
         if (data == null)
@@ -115,15 +151,13 @@ internal static class FontSubsetter
             return false;
         }
 
-        var subset = TrueTypeSubsetter.Subset(data, glyphs);
+        var subset = TrueTypeSubsetter.Subset(data, glyphs, stripHinting);
         if (subset == null || subset.Length >= data.Length * 0.9)
         {
             return false;
         }
 
-        program.Data = subset;
-        StreamOptimizer.SetFilters(program, Array.Empty<Filters.FilterSpec>());
-        program.Set("Length1", new PdfInteger(subset.Length));
+        Replace(program, subset);
 
         // PDF/A files list the glyphs present in a CIDSet; keep it accurate.
         foreach (var font in fonts)

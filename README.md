@@ -30,7 +30,7 @@ PdfCompressor.Compress(input, output, PdfCompressionLevel.Lossless);
 |---|---|
 | `Lossless` | Pages look exactly the same. Recompresses streams with maximum Deflate, packs objects into object streams, removes unused and duplicate objects. |
 | `Balanced` | Lossless, plus JPEG recompression of photos at quality 80, downsampling of images shown above 200 DPI, and removal of page thumbnails and private editor data. |
-| `Maximum` | Like Balanced, with JPEG quality 60, downsampling above 120 DPI, and XMP metadata removed. Good for screen reading and email. |
+| `Maximum` | Like Balanced, with JPEG quality 60, downsampling above 120 DPI, black-and-white scans downsampled to 200 DPI, and font hinting and XMP metadata removed. Good for screen reading and email. |
 
 ## Options
 
@@ -40,6 +40,8 @@ PdfCompressor.Compress(input, output, PdfCompressionLevel.Lossless);
 | `OptimizeJpegs` | on | Re-encodes existing baseline JPEGs with Huffman tables optimized for each image and drops EXIF and other extra segments. The pixels stay identical. |
 | `UseJbig2` | on | Re-encodes black-and-white images, such as scanned pages, with lossless JBIG2 (PDF 1.4). Scans typically shrink by half; the pixels stay identical. |
 | `SubsetFonts` | on | Removes unused glyphs from embedded TrueType fonts that address glyphs directly. Microsoft Print to PDF, for example, embeds whole fonts of several hundred kilobytes. |
+| `StripFontHinting` | off (on in Maximum) | Removes hinting from embedded TrueType fonts. It only adjusts how small text is drawn on screen; shapes and printing are unaffected. |
+| `MaxBilevelImageDpi` | null (200 in Maximum) | Black-and-white images, such as scanned pages, drawn at a higher resolution are downsampled to it. |
 | `UseObjectStreams` | on | Packs small objects into compressed object streams with a cross-reference stream (PDF 1.5). |
 | `RemoveUnusedObjects` | on | Drops objects nothing refers to, such as leftovers from incremental edits. |
 | `DeduplicateObjects` | on | Merges identical objects, such as a font or image embedded on every page. |

@@ -1,3 +1,4 @@
+using HazukiPdf.Filters;
 using System.Buffers.Binary;
 using System.Text;
 using HazukiPdf.Imaging;
@@ -61,6 +62,49 @@ public class Jbig2Tests
         var output = PdfCompressor.Compress(pdf, new PdfCompressionOptions { UseJbig2 = false });
 
         Assert.Equal("FlateDecode", FindImage(PdfReader.Read(output)).GetName("Filter"));
+    }
+
+    [Fact]
+    public void Compressor_DownsamplesScansAboveTheLimit()
+    {
+        // Left half black, right half white, shown at 288 DPI.
+        const int width = 600;
+        const int height = 400;
+        var packed = new byte[(width / 8) * height];
+        for (int y = 0; y < height; y++)
+        {
+            Array.Fill(packed, (byte)0xFF, (y * 75) + 38, 37);
+        }
+
+        var pdf = TestPdf.WithImage(packed, width, height, "/DeviceGray", 150, 100, "/BitsPerComponent 1");
+
+        var output = PdfCompressor.Compress(pdf, new PdfCompressionOptions { MaxBilevelImageDpi = 200 }, out var result);
+
+        Assert.Equal(1, result.ImagesDownsampled);
+        var document = PdfReader.Read(output);
+        var image = FindImage(document);
+        int newWidth = (int)(image.Get("Width").AsNumber() ?? 0);
+        int newHeight = (int)(image.Get("Height").AsNumber() ?? 0);
+        Assert.Equal(417, newWidth);
+        Assert.Equal(278, newHeight);
+        var filters = StreamFilters.GetFilters(image, document.Resolve);
+        Assert.Equal("JBIG2Decode", filters[^1].Name);
+        var jbig2 = StreamFilters.Decode(image.Data, filters.Take(filters.Count - 1).ToList(), strict: true);
+        var decoded = Jbig2TestDecoder.Decode(jbig2, newWidth, newHeight);
+        int stride = (newWidth + 7) / 8;
+        Assert.Equal(0x00, decoded[(100 * stride) + 10]); // still black on the left
+        Assert.Equal(0xFF, decoded[(100 * stride) + 40]); // still white on the right
+    }
+
+    [Fact]
+    public void Compressor_KeepsScanResolutionByDefault()
+    {
+        var packed = ScanLikeBitmap(600, 400, 7);
+        var pdf = TestPdf.WithImage(packed, 600, 400, "/DeviceGray", 150, 100, "/BitsPerComponent 1");
+
+        var output = PdfCompressor.Compress(pdf, PdfCompressionLevel.Balanced);
+
+        Assert.Equal(600, FindImage(PdfReader.Read(output)).Get("Width").AsNumber());
     }
 
     private static PdfStream FindImage(PdfDocument document) =>

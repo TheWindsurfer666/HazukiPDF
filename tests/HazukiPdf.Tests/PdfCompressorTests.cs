@@ -285,6 +285,10 @@ public class PdfCompressorTests
         Assert.True(maximum.MaxImageDpi < balanced.MaxImageDpi);
         Assert.True(maximum.RemoveMetadata);
         Assert.False(balanced.RemoveMetadata);
+        Assert.Null(balanced.MaxBilevelImageDpi);
+        Assert.Equal(200, maximum.MaxBilevelImageDpi);
+        Assert.False(balanced.StripFontHinting);
+        Assert.True(maximum.StripFontHinting);
     }
 
     [Theory]

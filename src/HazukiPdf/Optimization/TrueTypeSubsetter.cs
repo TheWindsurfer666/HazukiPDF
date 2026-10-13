@@ -23,11 +23,17 @@ internal static class TrueTypeSubsetter
     private const int HaveXYScale = 0x0040;
     private const int HaveTwoByTwo = 0x0080;
 
+    // Tables that only hold hinting: instructions that fit outlines to the pixel grid at small sizes on screen.
+    private static readonly HashSet<string> HintingTables = new(StringComparer.Ordinal) { "cvt ", "fpgm", "prep" };
+
+    private const int WeHaveInstructions = 0x0100;
+
     /// <summary>
     /// Returns the subset font, or null when the data is not a plain TrueType font this method understands.
-    /// <paramref name="glyphs"/> receives the composite glyph components that had to be kept as well.
+    /// <paramref name="glyphs"/> receives the composite glyph components that had to be kept as well; null keeps
+    /// every glyph. With <paramref name="stripHinting"/> the hinting tables and per-glyph instructions are removed.
     /// </summary>
-    public static byte[]? Subset(byte[] font, HashSet<int> glyphs)
+    public static byte[]? Subset(byte[] font, HashSet<int>? glyphs, bool stripHinting = false)
     {
         if (font.Length < 12)
         {
@@ -78,6 +84,8 @@ internal static class TrueTypeSubsetter
         int GlyphOffset(int gid) => longLoca
             ? (int)BinaryPrimitives.ReadUInt32BigEndian(font.AsSpan(loca.Offset + (gid * 4)))
             : BinaryPrimitives.ReadUInt16BigEndian(font.AsSpan(loca.Offset + (gid * 2))) * 2;
+
+        glyphs ??= new HashSet<int>(Enumerable.Range(0, numGlyphs));
 
         // Keep .notdef and every component of a kept composite glyph.
         glyphs.Add(0);
@@ -136,7 +144,8 @@ internal static class TrueTypeSubsetter
                 continue;
             }
 
-            newGlyf.Write(font, glyf.Offset + start, end - start);
+            var glyph = font.AsSpan(glyf.Offset + start, end - start);
+            newGlyf.Write(stripHinting ? WithoutInstructions(glyph) : glyph);
             while (newGlyf.Length % 4 != 0)
             {
                 newGlyf.WriteByte(0);
@@ -148,7 +157,7 @@ internal static class TrueTypeSubsetter
         var output = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var (tag, range) in tables)
         {
-            if (KeptTables.Contains(tag))
+            if (KeptTables.Contains(tag) && !(stripHinting && HintingTables.Contains(tag)))
             {
                 output[tag] = font.AsSpan(range.Offset, range.Length).ToArray();
             }
@@ -168,6 +177,60 @@ internal static class TrueTypeSubsetter
         }
 
         return Assemble(output);
+    }
+
+    /// <summary>Returns a glyph with its TrueType instructions removed; the outline is unchanged.</summary>
+    private static ReadOnlySpan<byte> WithoutInstructions(ReadOnlySpan<byte> glyph)
+    {
+        if (glyph.Length < 12)
+        {
+            return glyph;
+        }
+
+        int contours = BinaryPrimitives.ReadInt16BigEndian(glyph);
+        if (contours >= 0)
+        {
+            int at = 10 + (2 * contours);
+            if (at + 2 > glyph.Length)
+            {
+                return glyph;
+            }
+
+            int length = BinaryPrimitives.ReadUInt16BigEndian(glyph[at..]);
+            if (length == 0 || at + 2 + length > glyph.Length)
+            {
+                return glyph;
+            }
+
+            var result = new byte[glyph.Length - length];
+            glyph[..at].CopyTo(result);
+            glyph[(at + 2 + length)..].CopyTo(result.AsSpan(at + 2)); // the length field stays, now zero
+            return result;
+        }
+
+        // Composite: instructions, if any, follow the last component.
+        int p = 10;
+        int lastFlags = p;
+        while (p + 4 <= glyph.Length)
+        {
+            int flags = BinaryPrimitives.ReadUInt16BigEndian(glyph[p..]);
+            lastFlags = p;
+            p += 4 + ((flags & ArgsAreWords) != 0 ? 4 : 2);
+            p += (flags & HaveScale) != 0 ? 2 : (flags & HaveXYScale) != 0 ? 4 : (flags & HaveTwoByTwo) != 0 ? 8 : 0;
+            if ((flags & MoreComponents) == 0)
+            {
+                if ((flags & WeHaveInstructions) == 0 || p > glyph.Length)
+                {
+                    return glyph;
+                }
+
+                var result = glyph[..p].ToArray();
+                BinaryPrimitives.WriteUInt16BigEndian(result.AsSpan(lastFlags), (ushort)(flags & ~WeHaveInstructions));
+                return result;
+            }
+        }
+
+        return glyph;
     }
 
     private static byte[] Assemble(SortedDictionary<string, byte[]> tables)

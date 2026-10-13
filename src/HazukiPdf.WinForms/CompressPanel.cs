@@ -10,7 +10,7 @@ internal sealed class CompressPanel : UserControl
     [
         (PdfCompressionLevel.Lossless, "Lossless", "Pages look exactly the same. Recompresses streams and removes unused and duplicate objects."),
         (PdfCompressionLevel.Balanced, "Balanced", "Recompresses photos as JPEG (quality 80) and downsamples images above 200 DPI. Good for most files."),
-        (PdfCompressionLevel.Maximum, "Maximum", "JPEG quality 60, images above 120 DPI downsampled, metadata removed. Best for screen reading and email."),
+        (PdfCompressionLevel.Maximum, "Maximum", "JPEG quality 60, images above 120 DPI and scans above 200 DPI downsampled, font hinting and metadata removed. Best for screen reading and email."),
     ];
 
     private readonly BindingList<FileRow> _rows = new();
