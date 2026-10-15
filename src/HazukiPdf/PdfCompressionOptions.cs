@@ -16,8 +16,8 @@ public enum PdfCompressionLevel
     Balanced,
 
     /// <summary>
-    /// Everything in <see cref="Balanced"/>, but with JPEG quality 60, downsampling above 120 DPI, and removal of
-    /// XMP metadata. Best for on-screen reading and email.
+    /// Everything in <see cref="Balanced"/>, but with JPEG quality 60, downsampling above 120 DPI, black-and-white
+    /// scans downsampled to 200 DPI, font hinting and XMP metadata removed. Best for on-screen reading and email.
     /// </summary>
     Maximum,
 }
@@ -30,6 +30,7 @@ public sealed class PdfCompressionOptions
 {
     private int _jpegQuality = 75;
     private int? _maxImageDpi = 150;
+    private int? _maxBilevelImageDpi;
 
     /// <summary>Decode Flate, LZW, ASCII85, ASCIIHex and RunLength streams and re-encode them with maximum Deflate; compress uncompressed streams.</summary>
     public bool RecompressStreams { get; set; } = true;
@@ -50,6 +51,24 @@ public sealed class PdfCompressionOptions
     /// Microsoft Print to PDF, embed whole fonts of several hundred kilobytes each.
     /// </summary>
     public bool SubsetFonts { get; set; } = true;
+
+    /// <summary>
+    /// Remove hinting from embedded TrueType fonts: instructions that only adjust how small text is drawn on
+    /// screen. Shapes and printing are unaffected.
+    /// </summary>
+    public bool StripFontHinting { get; set; }
+
+    /// <summary>
+    /// Black-and-white images (such as scanned pages) displayed at a higher resolution than this are downsampled
+    /// to it. Null (the default) keeps their resolution.
+    /// </summary>
+    public int? MaxBilevelImageDpi
+    {
+        get => _maxBilevelImageDpi;
+        set => _maxBilevelImageDpi = value is null or >= 72
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value), "The maximum black-and-white image DPI must be at least 72.");
+    }
 
     /// <summary>Pack small objects into compressed object streams and write a cross-reference stream (requires PDF 1.5 readers).</summary>
     public bool UseObjectStreams { get; set; } = true;
@@ -125,6 +144,8 @@ public sealed class PdfCompressionOptions
                 options.RemoveThumbnails = true;
                 options.RemovePrivateApplicationData = true;
                 options.RemoveMetadata = true;
+                options.StripFontHinting = true;
+                options.MaxBilevelImageDpi = 200;
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(level), level, "Unknown compression level.");

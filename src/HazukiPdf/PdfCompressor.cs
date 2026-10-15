@@ -39,8 +39,8 @@ public static class PdfCompressor
         bool removedData = MetadataCleaner.Run(document, options);
 
         int jpegs = options.OptimizeJpegs ? JpegOptimizer.Run(document) : 0;
-        int bilevel = options.UseJbig2 ? BilevelImageOptimizer.Run(document) : 0;
-        int fonts = options.SubsetFonts ? FontSubsetter.Run(document) : 0;
+        var bilevel = BilevelImageOptimizer.Run(document, options);
+        int fonts = FontSubsetter.Run(document, options.SubsetFonts, options.StripFontHinting);
         var imageStats = options.CompressImages ? ImageOptimizer.Run(document, options) : default;
 
         int streams = options.RecompressStreams ? StreamOptimizer.Run(document) : 0;
@@ -58,9 +58,9 @@ public static class PdfCompressor
             OriginalSize = pdf.Length,
             CompressedSize = keepOriginal ? pdf.Length : output.Length,
             OriginalKept = keepOriginal,
-            StreamsRecompressed = keepOriginal ? 0 : streams + jpegs + bilevel + fonts,
+            StreamsRecompressed = keepOriginal ? 0 : streams + jpegs + bilevel.Recompressed + fonts,
             ImagesRecompressed = keepOriginal ? 0 : imageStats.Recompressed,
-            ImagesDownsampled = keepOriginal ? 0 : imageStats.Downsampled,
+            ImagesDownsampled = keepOriginal ? 0 : imageStats.Downsampled + bilevel.Downsampled,
             DuplicateObjectsRemoved = keepOriginal ? 0 : duplicates,
             UnusedObjectsRemoved = keepOriginal ? 0 : Math.Max(0, loaded - duplicates - written),
         };

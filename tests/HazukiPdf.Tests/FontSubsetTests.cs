@@ -26,6 +26,34 @@ public class FontSubsetTests
     }
 
     [Fact]
+    public void StripHinting_RemovesInstructionsButKeepsOutlines()
+    {
+        var font = BuildFont();
+        var stripped = TrueTypeSubsetter.Subset(font, null, stripHinting: true);
+
+        Assert.NotNull(stripped);
+        Assert.False(HasTable(stripped!, "fpgm"));
+        Assert.True(HasTable(font, "fpgm"));
+        var glyph = Glyph(stripped!, 1);
+        Assert.Equal(0, BinaryPrimitives.ReadUInt16BigEndian(glyph.AsSpan(12))); // no instructions left
+        Assert.Equal(Glyph(font, 1)[^5..], glyph[^5..]); // the same point
+        Assert.Equal(Glyph(font, 2), Glyph(stripped!, 2));
+        Assert.Equal(0xB1B0AFBAu, Checksum(stripped!));
+    }
+
+    [Fact]
+    public void Compressor_StripsHintingOnlyWhenAsked()
+    {
+        var pdf = BuildPdf("BT /F1 12 Tf 72 700 Td <0002> Tj ET", formFieldFont: true);
+
+        var maximum = FontProgram(PdfCompressor.Compress(pdf, PdfCompressionLevel.Maximum));
+        var balanced = FontProgram(PdfCompressor.Compress(pdf, PdfCompressionLevel.Balanced));
+
+        Assert.False(HasTable(maximum, "fpgm"));
+        Assert.Equal(BuildFont(), balanced);
+    }
+
+    [Fact]
     public void Subset_RejectsCffFonts()
     {
         var font = BuildFont();
@@ -154,10 +182,11 @@ public class FontSubsetTests
         BinaryPrimitives.WriteUInt16BigEndian(hhea.AsSpan(34), (ushort)glyphs.Length);
         var hmtx = new byte[glyphs.Length * 4];
         var gsub = new byte[400]; // a layout table the subset drops
+        var fpgm = Enumerable.Range(0, 300).Select(i => (byte)i).ToArray(); // hinting
 
         var tables = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
         {
-            ["GSUB"] = gsub, ["glyf"] = glyf.ToArray(), ["head"] = head, ["hhea"] = hhea, ["hmtx"] = hmtx, ["loca"] = loca, ["maxp"] = maxp,
+            ["GSUB"] = gsub, ["fpgm"] = fpgm, ["glyf"] = glyf.ToArray(), ["head"] = head, ["hhea"] = hhea, ["hmtx"] = hmtx, ["loca"] = loca, ["maxp"] = maxp,
         };
 
         var font = new MemoryStream();
@@ -212,6 +241,12 @@ public class FontSubsetTests
         BinaryPrimitives.WriteUInt16BigEndian(glyph.AsSpan(12), (ushort)component);
         BinaryPrimitives.WriteInt16BigEndian(glyph.AsSpan(14), 50);
         return glyph;
+    }
+
+    private static bool HasTable(byte[] font, string tag)
+    {
+        int count = BinaryPrimitives.ReadUInt16BigEndian(font.AsSpan(4));
+        return Enumerable.Range(0, count).Any(i => Encoding.ASCII.GetString(font, 12 + (i * 16), 4) == tag);
     }
 
     private static byte[] Glyph(byte[] font, int gid)

@@ -68,7 +68,7 @@ internal static class ImageOptimizer
     }
 
     /// <summary>Images used as soft masks or stencil masks of other images must stay lossless.</summary>
-    private static HashSet<int> CollectMaskImages(PdfDocument document)
+    internal static HashSet<int> CollectMaskImages(PdfDocument document)
     {
         var masks = new HashSet<int>();
         foreach (var obj in document.Objects.Values)
